@@ -3,7 +3,8 @@
 Create certificate and key for HTTPS in the root of the repository:
 
 ```bash
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 36524 -nodes -subj '/CN=example.com'
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
+    -sha256 -days 36524 -nodes -subj '/CN=example.com'
 ```
 
 ```bash
