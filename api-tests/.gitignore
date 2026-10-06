@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: GARDENA GmbH
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+test-server/
+__pycache__/
+test-server/.*
+test-server/bin/

@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: GARDENA GmbH
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "gateway-config-backend"
+version = "1.2.0"
+authors = ["Adrian Friedli <adrian.friedli@husqvarnagroup.com>", "Lukas Woodtli <lukas.woodtli@husqvarnagroup.com>"]
+description = "Backend component for the GARDENA smart Gateway config interface"
+homepage = "https://www.gardena.com/"
+license = "Proprietary"
+edition = "2021"
+rust-version = "1.75.0"
+
+[features]
+default = []
+nongwhw = []
+
+[dependencies]
+anyhow = "1.0.100"
+axum = { version = "0.6.2", default-features = false, features = ["json", "macros"] }
+axum-server = { version = "0.5.1", features = ["tls-openssl"] }
+dbus = { version = "0.9", default-features = false, features = ["futures"] }
+dbus-tokio = "0.7"
+gardenalog = { git = "https://github.com/husqvarnagroup/smart-garden-gateway-crates.git" }
+lazy_static = "1.5.0"
+listenfd = "1.0.2"
+openssl = { version = "0.10.75", default-features = false }
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+rand = { version = "0.9.2", default-features = false, features = ["std", "thread_rng" ] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+sha1 = { version = "0.10", default-features = false }
+tokio = { version = "1.48", features = ["process", "sync", "tokio-macros"] }
+tower-http = { version = "0.4", default-features = false, features = ["cors", "fs"] }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+# Transitive dependency held back for Yocto/Rust 1.75.0
+getrandom = "=0.3.0"
+
+[dev-dependencies]
+axum-test = { version = "2.0.0", default-features = false }
+serde_json = "1.0"
+tempdir = "0.3.7"
+
+[package.metadata.cargo-machete]
+ignored = ["getrandom"] # due to Yocto/Rust 1.75.0
+
+[profile.release]
+lto = true
+opt-level = "z"
+codegen-units = 1

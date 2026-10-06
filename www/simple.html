@@ -1,0 +1,442 @@
+<!--
+SPDX-FileCopyrightText: GARDENA GmbH
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GARDENA smart Gateway</title>
+    <script>
+        "use strict";
+
+        (function () {
+            let session_token = null;
+
+            function dom_loaded() {
+                get_element('login_form').addEventListener("submit", login);
+                get_element('wifi_form').addEventListener("submit", set_wifi);
+
+                get_element('timezone_set').addEventListener("click", set_timezone);
+                get_element('wifi_scan').addEventListener("click", function () {
+                    scan_wifi(false);
+                });
+                get_element('wifi_delete').addEventListener("click", function () {
+                    rest_delete('/wifi', 'wifi_delete', 'wifi_delete_result');
+                });
+                get_element('homekit_delete').addEventListener("click", function () {
+                    rest_delete('/homekit', 'homekit_delete', 'homekit_delete_result');
+                });
+                get_element('logout_button').addEventListener("click", logout);
+
+                get_element('wifi_select').addEventListener("change", wifi_update_settings);
+                get_element('wifi_key_mgmt').addEventListener("change", wifi_update_password_status);
+
+                rest_get_json('/version', function (data) {
+                    set_innerHTML('gateway_version', data.gateway_version)
+                });
+                rest_get_json('/authentication', function (data) {
+                    console.log('SSL certificate fingerprint: %s', data.certificate_fingerprint);
+                    console.log('Authentication hash: %s', data.authentication_hash);
+                });
+            }
+
+            function login(event) {
+                const request = new XMLHttpRequest();
+                request.open('POST', '/login', true);
+                request.setRequestHeader('Content-Type', 'application/json');
+                request.onreadystatechange = function () {
+                    if (request.readyState === 4) {
+                        if (request.status === 200) {
+                            session_token = JSON.parse(request.response).session;
+                            switch_to_content_page();
+                        } else if (request.status === 401) {
+                            set_innerHTML('login_result', 'Wrong password.');
+                        } else if (request.status === 429) {
+                            set_innerHTML('login_result', 'Too many failed login attempts, please try again later.');
+                        } else {
+                            set_innerHTML('login_result', 'error');
+                        }
+                    }
+                };
+                request.send(JSON.stringify({password: get_element('password').value}));
+
+                event.preventDefault();
+            }
+
+            function logout() {
+                const request = new XMLHttpRequest();
+                request.open('POST', '/logout', true);
+                request.setRequestHeader('Content-Type', 'application/json');
+                request.setRequestHeader('X-Session', session_token);
+                request.onreadystatechange = function () {
+                    if (request.readyState === 4) {
+                        if ([200, 204].includes(request.status)) {
+                            switch_to_logout_page();
+                        }
+                    }
+                };
+                request.send(null);
+            }
+
+            function switch_to_content_page() {
+                get_element('login_page').style.display = "none";
+                get_element('content_page').style.display = "";
+                populate_select_from_rest('timezone_select', null, ['timezone_set'], '/timezone_list', '/timezone');
+                scan_wifi(true);
+                rest_get_json('/ap', function (data) {
+                    if (data.active) {
+                        set_innerHTML('homekit_delete_result', 'Warning! This will stop Access Point Mode.');
+                    }
+                });
+            }
+
+            function switch_to_logout_page() {
+                get_element('content_page').style.display = "none";
+                get_element('logout_page').style.display = "";
+            }
+
+            // --- Timezone functions
+
+            function set_timezone() {
+                const timezone = get_selected_option('timezone_select').value;
+                rest_put_json('/timezone', timezone, 'timezone_set', 'timezone_set_result');
+            }
+
+            // --- Wi-Fi functions
+
+            function scan_wifi(populate_settings) {
+                populate_select_from_rest('wifi_select', 'wifi_scan', ['wifi_ssid', 'wifi_key_mgmt', 'wifi_password', 'wifi_set'], '/wifi_list', '/wifi',
+                    function (select, list, current) {
+                        const o = document.createElement('option');
+                        select.appendChild(o);
+
+                        list.forEach(function (d) {
+                            const o = document.createElement('option');
+                            o.setAttribute('value', d.ssid);
+                            if (d.ssid !== '') {
+                                o.appendChild(document.createTextNode(d.ssid + ' (' + d.security + ') (' + d.signal + ' dBm)'));
+                            } else {
+                                o.appendChild(document.createTextNode('<hidden network> (' + d.security + ') (' + d.signal + ' dBm)'));
+                            }
+                            o.setAttribute('data-security', d.security);
+                            if (current !== null && d.ssid === current.ssid && d.security === current.key_mgmt) {
+                                o.setAttribute('selected', '');
+                                wifi_select_disable_first_line();
+                            }
+                            if (!wifi_is_supported(d)) {
+                                o.disabled = true;
+                            }
+                            select.appendChild(o);
+                        });
+
+                        if (populate_settings && current !== null) {
+                            populate_wifi_settings(current)
+                        }
+                    },
+                    function () {
+                        wifi_update_password_status();
+                    }
+                );
+            }
+
+            function populate_wifi_settings(settings) {
+                get_element('wifi_ssid').value = settings.ssid;
+                select_option(get_element('wifi_key_mgmt'), settings.key_mgmt);
+            }
+
+            function set_wifi(event) {
+                const wifi_config = {
+                    'ssid': get_element('wifi_ssid').value,
+                    'key_mgmt': get_selected_option('wifi_key_mgmt').value,
+                    'psk': get_element('wifi_password').value,
+                };
+                rest_put_json('/wifi', wifi_config, 'wifi_set', 'wifi_set_result')
+
+                event.preventDefault();
+            }
+
+            function wifi_update_password_status() {
+                get_element('wifi_password').disabled = !wifi_needs_password(get_selected_option('wifi_key_mgmt').value);
+            }
+
+            function wifi_needs_password(key_mgmt) {
+                return key_mgmt === 'WPA-PSK';
+            }
+
+            function wifi_is_supported(d) {
+                return d.ssid !== null && (d.security === 'none' || d.security === 'WPA-PSK');
+            }
+
+            function wifi_select_disable_first_line() {
+                get_element('wifi_select').firstChild.disabled = true;
+            }
+
+            function wifi_update_settings() {
+                wifi_select_disable_first_line();
+                get_element('wifi_ssid').value = get_selected_option('wifi_select').value;
+                select_option(get_element('wifi_key_mgmt'), get_selected_option('wifi_select').getAttribute('data-security'));
+                wifi_update_password_status();
+            }
+
+            // --- Generic functions
+
+            function populate_select_from_rest(select_id, button_refresh_id, element_ids, url_list, url_current, populate_cb, finished_cb) {
+                const select = get_element(select_id);
+                const disabled_element_ids = [select_id, button_refresh_id].concat(element_ids);
+                disable_element_ids(disabled_element_ids);
+                populate_select(select, []);
+
+                let list_loaded = 0;
+                let current_loaded = 0;
+                let list, current;
+
+                function loaded_cb() {
+                    if (list_loaded === 1 && current_loaded === 1) {
+                        if (populate_cb !== null && populate_cb !== undefined) {
+                            populate_cb(select, list, current);
+                        } else {
+                            populate_select(select, list);
+                            select_option(select, current);
+                        }
+                        enable_element_ids(disabled_element_ids);
+                    } else if (list_loaded === 2 || current_loaded === 2) {
+                        loaded_cb = function () {
+                        };
+                        enable_element_ids([button_refresh_id]);
+                    }
+                    if (finished_cb !== null && finished_cb !== undefined) {
+                        finished_cb();
+                    }
+                }
+
+                rest_get_json(url_list, function (data) {
+                    list = data;
+                    list_loaded = 1;
+                    loaded_cb();
+                }, function () {
+                    list_loaded = 2;
+                    loaded_cb();
+                });
+
+                rest_get_json(url_current, function (data) {
+                    current = data;
+                    current_loaded = 1;
+                    loaded_cb();
+                }, function () {
+                    current_loaded = 2;
+                    loaded_cb();
+                });
+            }
+
+            // --- DOM functions
+
+            function get_element(id) {
+                if (id === null && id !== undefined) {
+                    return null;
+                }
+                return document.getElementById(id);
+            }
+
+            function get_selected_option(select_id) {
+                return get_element(select_id).selectedOptions[0];
+            }
+
+            function disable_element_ids(element_ids) {
+                element_ids.forEach(function (id) {
+                    if (get_element(id) !== null) {
+                        get_element(id).disabled = true;
+                    }
+                });
+            }
+
+            function enable_element_ids(element_ids) {
+                element_ids.forEach(function (id) {
+                    if (get_element(id) !== null) {
+                        get_element(id).disabled = false;
+                    }
+                });
+            }
+
+            function populate_select(select, data) {
+                while (select.firstChild) {
+                    select.removeChild(select.firstChild);
+                }
+                data.forEach(function (d) {
+                    const o = document.createElement('option');
+                    o.setAttribute('value', d);
+                    const t = document.createTextNode(d);
+                    o.appendChild(t);
+                    select.appendChild(o);
+                })
+            }
+
+            function select_option(select, current) {
+                for (const option of select.getElementsByTagName('option')) {
+                    if (option.value === current) {
+                        option.selected = true;
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            function set_innerHTML(element_id, result) {
+                const element = get_element(element_id);
+                if (element !== null) {
+                    element.innerHTML = result;
+                }
+            }
+
+            // --- REST functions
+
+            function rest_get_json(url, cb_ok, cb_err) {
+                const request = new XMLHttpRequest();
+                request.open('GET', url, true);
+                request.setRequestHeader('Accept', 'application/json');
+                if (session_token !== null) {
+                    request.setRequestHeader('X-Session', session_token);
+                }
+                request.onreadystatechange = function () {
+                    if (request.readyState === 4) {
+                        if (request.status === 200) {
+                            cb_ok(JSON.parse(request.response));
+                        } else {
+                            if (cb_err !== null && cb_err !== undefined) {
+                                cb_err();
+                            }
+                        }
+                    }
+                };
+                request.send(null);
+            }
+
+            function rest_put_json(url, data, button_id, result_element_id) {
+                disable_element_ids([button_id]);
+                set_innerHTML(result_element_id, '');
+                const request = new XMLHttpRequest();
+                request.open('PUT', url, true);
+                request.setRequestHeader('Content-Type', 'application/json');
+                if (session_token !== null) {
+                    request.setRequestHeader('X-Session', session_token);
+                }
+                request.onreadystatechange = function () {
+                    if (request.readyState === 4) {
+                        if ([200, 204].includes(request.status)) {
+                            set_innerHTML(result_element_id, 'ok');
+                        } else {
+                            set_innerHTML(result_element_id, 'error');
+                        }
+                        enable_element_ids([button_id]);
+                    }
+                };
+                request.send(JSON.stringify(data));
+            }
+
+            function rest_delete(url, button_id, result_element_id) {
+                disable_element_ids([button_id]);
+                set_innerHTML(result_element_id, '');
+                const request = new XMLHttpRequest();
+                request.open('DELETE', url, true);
+                if (session_token !== null) {
+                    request.setRequestHeader('X-Session', session_token);
+                }
+                request.onreadystatechange = function () {
+                    if (request.readyState === 4) {
+                        if ([200, 204].includes(request.status)) {
+                            set_innerHTML(result_element_id, 'ok');
+                        } else {
+                            set_innerHTML(result_element_id, 'error');
+                        }
+                        enable_element_ids([button_id]);
+                    }
+                };
+                request.send(null);
+            }
+
+            // --- register for dom loaded event
+
+            if (document.readyState === "loading") {
+                document.addEventListener("DOMContentLoaded", dom_loaded);
+            } else {
+                dom_loaded();
+            }
+        })();
+    </script>
+</head>
+
+<body>
+<div id="login_page">
+    <ul style="list-style: none;">
+        <li>
+            <form id="login_form">
+                <label for="password">Password: </label><br>
+                <input id="password" type="password"><br>
+                <input id="login_post" type="submit" value="login">
+                <span id="login_result"></span>
+            </form>
+        </li>
+        <li>
+            <p>Gateway Version: <span id="gateway_version"></span></p>
+        </li>
+    </ul>
+</div>
+<div id="content_page" style="display: none;">
+    <ul style="list-style: none;">
+        <li>
+            <label for="timezone_select">Timezone:</label><br>
+            <select id="timezone_select"></select>
+            <button id="timezone_set" type="button">set timezone</button>
+            <span id="timezone_set_result"></span>
+        </li>
+        <li>
+            <p>
+                <label for="wifi_select">Select Wi-Fi Network: </label><br>
+                <select id="wifi_select"></select>
+                <button id="wifi_scan" type="button">scan</button>
+            </p>
+            <form id="wifi_form">
+                <p>
+                    <label for="wifi_ssid">Wi-Fi SSID: </label><br>
+                    <input id="wifi_ssid" type="text"><br>
+                    <label for="wifi_key_mgmt">Wi-Fi Security: </label><br>
+                    <select id="wifi_key_mgmt">
+                        <option value="none">None</option>
+                        <option value="WPA-PSK">WPA/WPA2</option>
+                    </select><br>
+                    <label for="wifi_password">Wi-Fi Password: </label><br>
+                    <input id="wifi_password" type="text"><br>
+                    <input id="wifi_set" type="submit" value="save">
+                    <span id="wifi_set_result"></span>
+                </p>
+            </form>
+        </li>
+        <li>
+            <button id="wifi_delete" type="button">
+                reset Wi-Fi settings
+            </button>
+            <span id="wifi_delete_result"></span>
+        </li>
+        <li>
+            <button id="homekit_delete" type="button">reset HomeKit pairings</button>
+            <span id="homekit_delete_result"></span>
+        </li>
+        <li>
+            <button id="logout_button" type="button">logout</button>
+        </li>
+    </ul>
+</div>
+<div id="logout_page" style="display: none;">
+    <ul style="list-style: none;">
+        <li>
+            <p>Logged out successfully.</p>
+        </li>
+    </ul>
+</div>
+</body>
+
+</html>

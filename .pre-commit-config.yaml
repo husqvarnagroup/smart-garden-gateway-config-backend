@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: GARDENA GmbH
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+repos:
+  - repo: local
+    hooks:
+    - id: rust-fmt
+      name: Rust format
+      description: Run cargo fmt on files
+      entry: cargo fmt --all --
+      pass_filenames: true
+      types: [file, rust]
+      language: system
+    - id: rust-clippy
+      name: Rust clippy
+      description: Run cargo clippy on files
+      entry: cargo clippy --all-targets --all-features -- -D warnings
+      pass_filenames: false
+      types: [file, rust]
+      language: system
+  - repo: https://github.com/fsfe/reuse-tool
+    rev: v6.2.0
+    hooks:
+      - id: reuse
