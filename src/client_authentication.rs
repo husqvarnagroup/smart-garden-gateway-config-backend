@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::app::AppState;
+use crate::command::restart_service_checked;
 use crate::gateway_info::GATEWAY_ID;
 use axum::middleware::Next;
 use axum::Json;
@@ -390,6 +391,12 @@ pub(crate) async fn set_custom_password(
     match set_password(&get_password_file_path(), &request.password).await {
         Ok(()) => {
             debug!("custom password set");
+            if !cfg!(feature = "nongwhw") {
+                if let Err(status) = restart_service_checked("websocketd").await {
+                    error!("failed to restart websocketd");
+                    return status;
+                }
+            }
             StatusCode::NO_CONTENT
         }
         Err(err) => {
@@ -425,6 +432,12 @@ pub(crate) async fn delete_custom_password(
     match tokio::fs::remove_file(get_password_file_path()).await {
         Ok(()) => {
             info!("custom password deleted");
+            if !cfg!(feature = "nongwhw") {
+                if let Err(status) = restart_service_checked("websocketd").await {
+                    error!("failed to restart websocketd");
+                    return status;
+                }
+            }
             StatusCode::NO_CONTENT
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
